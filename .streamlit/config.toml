@@ -1,0 +1,17 @@
+[theme]
+base="light"
+primaryColor="#000000"
+backgroundColor="#FFFFFF"
+secondaryBackgroundColor="#F8F8F8"
+textColor="#000000"
+font="sans serif"
+
+[global]
+disableWidgetStateDuplicationWarning = true
+
+[server]
+headless = true
+enableCORS = false
+
+[browser]
+gatherUsageStats = false
