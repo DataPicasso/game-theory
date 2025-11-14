@@ -51,6 +51,7 @@ def inject_css():
         .calendar-day { border: 1px solid #e0e0e0; padding: 8px; min-height: 120px; }
         .calendar-today { background-color: #f0f8ff; border: 2px solid #000; }
         .mission-completed { text-decoration: line-through; color: #888; }
+        .attribute-card { border: 1px solid #ddd; padding: 10px; margin: 5px 0; border-radius: 5px; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -145,6 +146,10 @@ DEFAULT_PROFILE = {
     "streak_days": 0,
     "last_active_date": None,
     "created_date": date.today().isoformat(),
+    "player_name": "",
+    "player_bio": "",
+    "player_goals": "",
+    "player_motivation": "",
 }
 
 DEFAULT_CONFIG = {
@@ -152,15 +157,22 @@ DEFAULT_CONFIG = {
     "xp_base_per_level": 100,
     "calendar_start_week_on": "monday",
     "default_view": "month",
+    "theme": "minimal",
+    "language": "es",
+    "notifications_enabled": True,
+    "auto_save": True,
+    "daily_reset_time": "06:00",
 }
 
 DEFAULT_ATTRIBUTES = {
     "attributes": [
-        {"id": "strength", "name": "Fuerza", "current_xp": 0, "description": "Fuerza física y resistencia"},
-        {"id": "intelligence", "name": "Inteligencia", "current_xp": 0, "description": "Capacidad mental y aprendizaje"},
-        {"id": "vitality", "name": "Vitalidad", "current_xp": 0, "description": "Energía y salud general"},
-        {"id": "discipline", "name": "Disciplina", "current_xp": 0, "description": "Autocontrol y consistencia"},
-        {"id": "creativity", "name": "Creatividad", "current_xp": 0, "description": "Pensamiento innovador y artístico"},
+        {"id": "strength", "name": "Fuerza", "current_xp": 0, "description": "Fuerza física y resistencia", "color": "#FF6B6B", "icon": "💪"},
+        {"id": "intelligence", "name": "Inteligencia", "current_xp": 0, "description": "Capacidad mental y aprendizaje", "color": "#4ECDC4", "icon": "🧠"},
+        {"id": "vitality", "name": "Vitalidad", "current_xp": 0, "description": "Energía y salud general", "color": "#45B7D1", "icon": "❤️"},
+        {"id": "discipline", "name": "Disciplina", "current_xp": 0, "description": "Autocontrol y consistencia", "color": "#96CEB4", "icon": "⚡"},
+        {"id": "creativity", "name": "Creatividad", "current_xp": 0, "description": "Pensamiento innovador y artístico", "color": "#FFEAA7", "icon": "🎨"},
+        {"id": "social", "name": "Social", "current_xp": 0, "description": "Habilidades sociales y relaciones", "color": "#DDA0DD", "icon": "👥"},
+        {"id": "wisdom", "name": "Sabiduría", "current_xp": 0, "description": "Experiencia y juicio", "color": "#98D8C8", "icon": "🦉"},
     ]
 }
 
@@ -330,7 +342,7 @@ def save_all_user_data(username: str):
     save_json(username, "rewards", "rewards.json")
     save_jsonl(username, "mission_log", "mission_log.jsonl")
     save_jsonl(username, "journal", "journal.jsonl")
-    save_jsonl(username, "decisions", "decisions.jsonl")
+    save_jsonl(username, "decisions", "decisions.jsonl())
 
 # =========================================================
 #  LÓGICA DEL JUEGO
@@ -1288,128 +1300,387 @@ def page_rewards():
                 reward = next(r for r in rewards if r["id"] == redemption["reward_id"])
                 st.write(f"**{redemption['date']}** - {reward['name']} (-{redemption['tokens_spent']} tokens)")
 
-# ---------- CONFIGURACIÓN ----------
+# ---------- CONFIGURACIÓN COMPLETA ----------
 
 def page_config():
-    st.header("⚙️ Configuración del Sistema")
+    st.header("⚙️ Configuración Completa del Sistema")
     
-    tab1, tab2, tab3 = st.tabs(["Ajustes", "Datos", "Estadísticas"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "👤 Perfil de Usuario", 
+        "💪 Atributos y Fortalezas", 
+        "🎮 Ajustes del Juego",
+        "📊 Datos y Estadísticas",
+        "🔧 Sistema Avanzado"
+    ])
     
     with tab1:
-        st.subheader("Ajustes del Juego")
+        st.subheader("👤 Perfil Personal")
+        
+        profile = st.session_state["profile"]["data"]
+        
+        with st.form("profile_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                player_name = st.text_input(
+                    "Nombre del Jugador",
+                    value=profile.get("player_name", ""),
+                    placeholder="Tu nombre o alias"
+                )
+                
+                current_level = st.number_input(
+                    "Nivel Actual",
+                    min_value=1,
+                    max_value=100,
+                    value=profile["current_level"]
+                )
+                
+                current_xp = st.number_input(
+                    "XP Actual",
+                    min_value=0,
+                    value=profile["current_xp"]
+                )
+                
+                total_tokens = st.number_input(
+                    "Tokens Totales",
+                    min_value=0,
+                    value=profile["total_tokens"]
+                )
+            
+            with col2:
+                player_bio = st.text_area(
+                    "Biografía Personal",
+                    value=profile.get("player_bio", ""),
+                    placeholder="Describe quién eres, tus valores, tu misión..."
+                )
+                
+                player_goals = st.text_area(
+                    "Metas Principales",
+                    value=profile.get("player_goals", ""),
+                    placeholder="Tus objetivos a largo plazo..."
+                )
+                
+                player_motivation = st.text_area(
+                    "Motivación Personal",
+                    value=profile.get("player_motivation", ""),
+                    placeholder="¿Qué te impulsa a seguir adelante?"
+                )
+            
+            if st.form_submit_button("💾 Guardar Perfil"):
+                profile["player_name"] = player_name
+                profile["player_bio"] = player_bio
+                profile["player_goals"] = player_goals
+                profile["player_motivation"] = player_motivation
+                profile["current_level"] = current_level
+                profile["current_xp"] = current_xp
+                profile["total_tokens"] = total_tokens
+                st.success("Perfil actualizado correctamente!")
+    
+    with tab2:
+        st.subheader("💪 Sistema de Atributos")
+        
+        attributes_data = st.session_state["attributes"]["data"]
+        attributes = attributes_data["attributes"]
+        
+        st.info("💡 **Los atributos representan tus fortalezas y áreas de desarrollo.** Cada misión puede contribuir a uno o más atributos.")
+        
+        # Lista de atributos existentes
+        st.write("### Atributos Actuales")
+        
+        for i, attr in enumerate(attributes):
+            with st.expander(f"{attr.get('icon', '⭐')} {attr['name']} - {attr['current_xp']} XP", expanded=False):
+                with st.form(f"edit_attr_{i}"):
+                    col1, col2, col3 = st.columns([2, 2, 1])
+                    
+                    with col1:
+                        new_name = st.text_input("Nombre", value=attr["name"], key=f"name_{i}")
+                        new_description = st.text_area(
+                            "Descripción", 
+                            value=attr.get("description", ""),
+                            key=f"desc_{i}"
+                        )
+                    
+                    with col2:
+                        new_xp = st.number_input(
+                            "XP Actual", 
+                            min_value=0, 
+                            value=attr["current_xp"],
+                            key=f"xp_{i}"
+                        )
+                        new_color = st.color_picker(
+                            "Color", 
+                            value=attr.get("color", "#4ECDC4"),
+                            key=f"color_{i}"
+                        )
+                    
+                    with col3:
+                        icon_options = ["💪", "🧠", "❤️", "⚡", "🎨", "👥", "🦉", "⭐", "🔥", "🌱", "📚", "🏃"]
+                        new_icon = st.selectbox(
+                            "Icono",
+                            options=icon_options,
+                            index=icon_options.index(attr.get("icon", "⭐")) if attr.get("icon") in icon_options else 0,
+                            key=f"icon_{i}"
+                        )
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.form_submit_button("💾 Actualizar Atributo"):
+                            attr["name"] = new_name
+                            attr["description"] = new_description
+                            attr["current_xp"] = new_xp
+                            attr["color"] = new_color
+                            attr["icon"] = new_icon
+                            st.success(f"Atributo {new_name} actualizado!")
+                    
+                    with col2:
+                        if st.button("🗑️ Eliminar", key=f"delete_{i}"):
+                            attributes.remove(attr)
+                            st.rerun()
+        
+        # Crear nuevo atributo
+        st.write("### ➕ Crear Nuevo Atributo")
+        with st.form("new_attribute_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                new_attr_name = st.text_input("Nombre del Nuevo Atributo")
+                new_attr_desc = st.text_area("Descripción")
+            
+            with col2:
+                new_attr_xp = st.number_input("XP Inicial", min_value=0, value=0)
+                new_attr_color = st.color_picker("Color", value="#4ECDC4")
+                icon_options = ["💪", "🧠", "❤️", "⚡", "🎨", "👥", "🦉", "⭐", "🔥", "🌱", "📚", "🏃"]
+                new_attr_icon = st.selectbox("Icono", options=icon_options)
+            
+            if st.form_submit_button("✨ Crear Atributo"):
+                if new_attr_name.strip():
+                    new_attribute = {
+                        "id": f"attr_{uuid.uuid4().hex}",
+                        "name": new_attr_name.strip(),
+                        "description": new_attr_desc,
+                        "current_xp": new_attr_xp,
+                        "color": new_attr_color,
+                        "icon": new_attr_icon
+                    }
+                    attributes.append(new_attribute)
+                    st.success("Nuevo atributo creado!")
+                    st.rerun()
+                else:
+                    st.error("El nombre del atributo es obligatorio")
+    
+    with tab3:
+        st.subheader("🎮 Ajustes del Juego")
         
         config = st.session_state["config"]["data"]
         profile = st.session_state["profile"]["data"]
         
         col1, col2 = st.columns(2)
+        
         with col1:
-            new_base_xp = st.number_input(
-                "XP necesario para subir de nivel",
-                10, 10000, config.get("xp_base_per_level", 100)
+            st.write("### Sistema de Niveles")
+            xp_base = st.number_input(
+                "XP necesario por nivel",
+                min_value=10,
+                max_value=10000,
+                value=config.get("xp_base_per_level", 100),
+                help="Cantidad de XP requerida para subir de nivel"
             )
             
             xp_formula = st.selectbox(
-                "Fórmula de progresión de nivel",
-                ["linear", "exponential", "custom"],
-                index=0
+                "Fórmula de progresión",
+                options=["linear", "exponential", "custom"],
+                index=0,
+                help="Cómo escala la dificultad entre niveles"
+            )
+            
+            st.write("### Sistema de Recompensas")
+            auto_save = st.checkbox(
+                "Guardado automático",
+                value=config.get("auto_save", True),
+                help="Guardar automáticamente los cambios"
+            )
+            
+            notifications = st.checkbox(
+                "Notificaciones",
+                value=config.get("notifications_enabled", True),
+                help="Mostrar notificaciones del sistema"
             )
         
         with col2:
-            start_week_on = st.selectbox(
-                "La semana comienza en",
-                ["monday", "sunday"],
+            st.write("### Interfaz")
+            theme = st.selectbox(
+                "Tema de la aplicación",
+                options=["minimal", "dark", "light"],
+                index=0
+            )
+            
+            language = st.selectbox(
+                "Idioma",
+                options=["es", "en", "fr", "de"],
                 index=0
             )
             
             default_view = st.selectbox(
-                "Vista por defecto del calendario",
-                ["month", "week", "day"],
+                "Vista por defecto",
+                options=["month", "week", "day"],
                 index=0
             )
+            
+            start_week_on = st.selectbox(
+                "La semana comienza en",
+                options=["monday", "sunday"],
+                index=0
+            )
+            
+            daily_reset = st.time_input(
+                "Hora de reset diario",
+                value=datetime.strptime(config.get("daily_reset_time", "06:00"), "%H:%M").time()
+            )
         
-        if st.button("Guardar Configuración"):
-            config["xp_base_per_level"] = new_base_xp
+        if st.button("💾 Guardar Ajustes del Juego"):
+            config["xp_base_per_level"] = xp_base
             config["xp_formula"] = xp_formula
-            config["calendar_start_week_on"] = start_week_on
+            config["theme"] = theme
+            config["language"] = language
             config["default_view"] = default_view
-            st.success("Configuración guardada!")
+            config["calendar_start_week_on"] = start_week_on
+            config["notifications_enabled"] = notifications
+            config["auto_save"] = auto_save
+            config["daily_reset_time"] = daily_reset.strftime("%H:%M")
+            
+            # Actualizar también en el perfil si es diferente
+            if profile["xp_base_per_level"] != xp_base:
+                profile["xp_base_per_level"] = xp_base
+            
+            st.success("Ajustes del juego guardados correctamente!")
     
-    with tab2:
-        st.subheader("Gestión de Datos")
+    with tab4:
+        st.subheader("📊 Gestión de Datos")
         
         col1, col2 = st.columns(2)
+        
         with col1:
-            if st.button("💾 Guardar en GitHub"):
+            st.write("### Guardado y Carga")
+            if st.button("💾 Guardar en GitHub", use_container_width=True):
                 save_all_user_data(st.session_state.username)
                 st.success("Todos los datos guardados en GitHub!")
             
-            if st.button("🔄 Recargar desde GitHub"):
+            if st.button("🔄 Recargar desde GitHub", use_container_width=True):
                 load_all_user_data(st.session_state.username)
                 st.success("Datos recargados desde GitHub!")
+            
+            st.write("### Exportación")
+            # Crear objeto con todos los datos para exportar
+            export_data = {
+                "profile": st.session_state["profile"]["data"],
+                "config": st.session_state["config"]["data"],
+                "attributes": st.session_state["attributes"]["data"],
+                "missions": st.session_state["missions"]["data"],
+                "calendar": st.session_state["calendar"]["data"],
+                "rewards": st.session_state["rewards"]["data"],
+                "mission_log": st.session_state["mission_log"]["data"],
+                "journal": st.session_state["journal"]["data"],
+                "decisions": st.session_state["decisions"]["data"],
+                "export_date": datetime.now().isoformat(),
+                "export_version": "1.0"
+            }
+            
+            st.download_button(
+                label="📥 Descargar Backup Completo",
+                data=json.dumps(export_data, indent=2, ensure_ascii=False),
+                file_name=f"lifegame_backup_{date.today().isoformat()}.json",
+                mime="application/json",
+                use_container_width=True
+            )
         
         with col2:
-            if st.button("📊 Exportar Datos"):
-                # Crear un objeto con todos los datos para exportar
-                export_data = {
-                    "profile": st.session_state["profile"]["data"],
-                    "missions": st.session_state["missions"]["data"],
-                    "attributes": st.session_state["attributes"]["data"],
-                    "mission_log": st.session_state["mission_log"]["data"],
-                    "journal": st.session_state["journal"]["data"],
-                    "decisions": st.session_state["decisions"]["data"],
-                    "export_date": datetime.now().isoformat()
-                }
-                
-                st.download_button(
-                    label="Descargar JSON",
-                    data=json.dumps(export_data, indent=2),
-                    file_name=f"lifegame_export_{date.today().isoformat()}.json",
-                    mime="application/json"
-                )
+            st.write("### Estadísticas del Sistema")
             
-            if st.button("🆕 Reiniciar Progreso", type="secondary"):
-                if st.checkbox("¿Estás seguro? Esta acción no se puede deshacer"):
+            profile = st.session_state["profile"]["data"]
+            mission_log = st.session_state["mission_log"]["data"]
+            journal = st.session_state["journal"]["data"]
+            decisions = st.session_state["decisions"]["data"]
+            
+            # Calcular estadísticas
+            total_missions = len(mission_log)
+            total_xp = sum(log.get("xp_awarded", 0) for log in mission_log)
+            total_tokens_earned = sum(log.get("tokens_awarded", 0) for log in mission_log)
+            total_journal = len(journal)
+            total_decisions = len(decisions)
+            
+            days_active = len(set(log["date"] for log in mission_log))
+            avg_missions = total_missions / days_active if days_active > 0 else 0
+            
+            st.metric("Días Activos", days_active)
+            st.metric("Misiones Totales", total_missions)
+            st.metric("XP Total Ganado", total_xp)
+            st.metric("Entradas de Diario", total_journal)
+            st.metric("Decisiones Registradas", total_decisions)
+            st.metric("Misiones/Día Promedio", f"{avg_missions:.1f}")
+            
+            st.write("### Acciones Peligrosas")
+            if st.button("🆕 Reiniciar Progreso", type="secondary", use_container_width=True):
+                if st.checkbox("¿Estás completamente seguro? Esta acción NO se puede deshacer"):
                     st.session_state["profile"]["data"] = DEFAULT_PROFILE.copy()
                     st.session_state["mission_log"]["data"] = []
-                    st.success("Progreso reiniciado!")
+                    st.session_state["journal"]["data"] = []
+                    st.session_state["decisions"]["data"] = []
+                    st.success("Progreso reiniciado! Los datos base se mantienen.")
     
-    with tab3:
-        st.subheader("Estadísticas del Jugador")
+    with tab5:
+        st.subheader("🔧 Sistema Avanzado")
         
-        profile = st.session_state["profile"]["data"]
-        mission_log = st.session_state["mission_log"]["data"]
-        journal = st.session_state["journal"]["data"]
-        decisions = st.session_state["decisions"]["data"]
-        
-        # Calcular estadísticas
-        total_missions_completed = len(mission_log)
-        total_xp_earned = sum(log.get("xp_awarded", 0) for log in mission_log)
-        total_tokens_earned = sum(log.get("tokens_awarded", 0) for log in mission_log)
-        total_journal_entries = len(journal)
-        total_decisions = len(decisions)
-        
-        days_active = len(set(log["date"] for log in mission_log))
-        avg_missions_per_day = total_missions_completed / days_active if days_active > 0 else 0
+        st.warning("⚠️ **Configuración avanzada** - Modifica estos ajustes solo si sabes lo que estás haciendo.")
         
         col1, col2 = st.columns(2)
+        
         with col1:
-            st.metric("Nivel Actual", profile["current_level"])
-            st.metric("Misiones Completadas", total_missions_completed)
-            st.metric("XP Total Ganado", total_xp_earned)
-            st.metric("Días Activos", days_active)
+            st.write("### Rendimiento")
+            cache_size = st.number_input(
+                "Tamaño de caché (MB)",
+                min_value=10,
+                max_value=1000,
+                value=100,
+                help="Memoria usada para cachear datos"
+            )
+            
+            auto_refresh = st.number_input(
+                "Auto-refresco (segundos)",
+                min_value=0,
+                max_value=3600,
+                value=0,
+                help="0 = desactivado"
+            )
+            
+            st.write("### Desarrollo")
+            debug_mode = st.checkbox("Modo Debug", value=False)
+            experimental_features = st.checkbox("Características Experimentales", value=False)
         
         with col2:
-            st.metric("Tokens Ganados", total_tokens_earned)
-            st.metric("Entradas de Diario", total_journal_entries)
-            st.metric("Decisiones Registradas", total_decisions)
-            st.metric("Misiones/Día Promedio", f"{avg_missions_per_day:.1f}")
+            st.write("### Integraciones")
+            github_sync = st.checkbox("Sincronización automática con GitHub", value=True)
+            backup_interval = st.selectbox(
+                "Frecuencia de backup automático",
+                options=["disabled", "hourly", "daily", "weekly"],
+                index=2
+            )
+            
+            st.write("### Personalización CSS")
+            custom_css = st.text_area(
+                "CSS Personalizado",
+                value="",
+                height=100,
+                help="Añade estilos CSS personalizados"
+            )
+            
+            if st.button("Aplicar CSS"):
+                if custom_css.strip():
+                    st.markdown(f"<style>{custom_css}</style>", unsafe_allow_html=True)
+                    st.success("CSS aplicado!")
         
-        # Progreso de atributos
-        st.subheader("Progreso de Atributos")
-        attributes = st.session_state["attributes"]["data"]["attributes"]
-        for attr in attributes:
-            st.write(f"**{attr['name']}:** {attr['current_xp']} XP")
-            # Podrías agregar una barra de progreso aquí si quisieras
+        if st.button("💾 Guardar Configuración Avanzada"):
+            # Aquí guardarías la configuración avanzada
+            st.success("Configuración avanzada guardada!")
 
 # =========================================================
 #  ROUTING
@@ -1427,6 +1698,11 @@ username = st.session_state.username
 st.sidebar.title("🎮 LifeGame Theory")
 st.sidebar.write(f"**Jugador:** {username}")
 
+# Mostrar nombre personalizado si existe
+profile = st.session_state["profile"]["data"]
+if profile.get("player_name"):
+    st.sidebar.write(f"**Nombre:** {profile['player_name']}")
+
 # Navegación
 menu = st.sidebar.radio(
     "Navegación",
@@ -1442,14 +1718,13 @@ menu = st.sidebar.radio(
 )
 
 # Estado rápido en sidebar
-profile = st.session_state["profile"]["data"]
 st.sidebar.markdown("---")
 st.sidebar.write(f"**Nivel {profile['current_level']}**")
 st.sidebar.write(f"XP: {profile['current_xp']}/{profile['xp_base_per_level']}")
 st.sidebar.write(f"Tokens: {profile['total_tokens']}")
 
 # Guardado automático
-if st.sidebar.button("💾 Guardar Todo"):
+if st.sidebar.button("💾 Guardar Todo", use_container_width=True):
     save_all_user_data(username)
     st.sidebar.success("Guardado!")
 
