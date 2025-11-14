@@ -1,4 +1,4 @@
-# LifeRPG
+# Game theory
 
 Aplicacion en Streamlit para vivir la vida como un RPG: misiones, experiencia, niveles y atributos, con datos persistidos en GitHub.
 
