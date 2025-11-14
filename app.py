@@ -3,7 +3,9 @@ import json
 import requests
 import base64
 import uuid
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timedelta
+import calendar
+from typing import List, Dict, Any
 
 # =========================================================
 #  CONFIGURACIÓN GENERAL
@@ -42,6 +44,13 @@ def inject_css():
             border:1px solid #000 !important;
             border-radius:4px !important;
         }
+        .mission-daily { border-left: 4px solid #4CAF50; padding-left: 10px; margin: 5px 0; }
+        .mission-weekly { border-left: 4px solid #2196F3; padding-left: 10px; margin: 5px 0; }
+        .mission-monthly { border-left: 4px solid #FF9800; padding-left: 10px; margin: 5px 0; }
+        .mission-epic { border-left: 4px solid #9C27B0; padding-left: 10px; margin: 5px 0; }
+        .calendar-day { border: 1px solid #e0e0e0; padding: 8px; min-height: 120px; }
+        .calendar-today { background-color: #f0f8ff; border: 2px solid #000; }
+        .mission-completed { text-decoration: line-through; color: #888; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -135,6 +144,7 @@ DEFAULT_PROFILE = {
     "total_tokens": 0,
     "streak_days": 0,
     "last_active_date": None,
+    "created_date": date.today().isoformat(),
 }
 
 DEFAULT_CONFIG = {
@@ -146,15 +156,52 @@ DEFAULT_CONFIG = {
 
 DEFAULT_ATTRIBUTES = {
     "attributes": [
-        {"id": "strength", "name": "Fuerza", "current_xp": 0},
-        {"id": "intelligence", "name": "Inteligencia", "current_xp": 0},
-        {"id": "vitality", "name": "Vitalidad", "current_xp": 0},
+        {"id": "strength", "name": "Fuerza", "current_xp": 0, "description": "Fuerza física y resistencia"},
+        {"id": "intelligence", "name": "Inteligencia", "current_xp": 0, "description": "Capacidad mental y aprendizaje"},
+        {"id": "vitality", "name": "Vitalidad", "current_xp": 0, "description": "Energía y salud general"},
+        {"id": "discipline", "name": "Disciplina", "current_xp": 0, "description": "Autocontrol y consistencia"},
+        {"id": "creativity", "name": "Creatividad", "current_xp": 0, "description": "Pensamiento innovador y artístico"},
     ]
 }
 
-DEFAULT_MISSIONS = {"missions": []}
+DEFAULT_MISSIONS = {
+    "missions": [
+        {
+            "id": "m_daily_routine",
+            "name": "Rutina Matutina",
+            "description": "Meditación, ejercicio y planificación del día",
+            "type": "daily",
+            "base_xp": 15,
+            "tokens_reward": 2,
+            "attribute_id": "discipline",
+            "start_date": date.today().isoformat(),
+            "end_date": None,
+            "recurrence": "everyday",
+            "priority": "high"
+        }
+    ]
+}
+
 DEFAULT_CALENDAR = {"events": []}
-DEFAULT_REWARDS = {"rewards": [], "redemptions": []}
+DEFAULT_REWARDS = {
+    "rewards": [
+        {
+            "id": "r_break",
+            "name": "Descanso Premium - 30 min sin culpa",
+            "description": "Tiempo de ocio totalmente justificado",
+            "cost_tokens": 10,
+            "category": "leisure"
+        },
+        {
+            "id": "r_treat",
+            "name": "Premio Especial",
+            "description": "Algo que realmente disfrutes",
+            "cost_tokens": 25,
+            "category": "reward"
+        }
+    ],
+    "redemptions": []
+}
 
 # =========================================================
 #  CREACIÓN AUTOMÁTICA DE /data Y DATA DEL USUARIO
@@ -205,6 +252,10 @@ def init_session():
         st.session_state.authenticated = False
     if "username" not in st.session_state:
         st.session_state.username = None
+    if "current_date" not in st.session_state:
+        st.session_state.current_date = date.today()
+    if "calendar_view" not in st.session_state:
+        st.session_state.calendar_view = "month"
 
 # =========================================================
 #  LOAD & SAVE DATA
@@ -282,6 +333,136 @@ def save_all_user_data(username: str):
     save_jsonl(username, "decisions", "decisions.jsonl")
 
 # =========================================================
+#  LÓGICA DEL JUEGO
+# =========================================================
+
+def get_today_missions() -> List[Dict]:
+    """Obtiene las misiones para el día actual"""
+    today = st.session_state.current_date.isoformat()
+    missions = st.session_state["missions"]["data"]["missions"]
+    mission_log = st.session_state["mission_log"]["data"]
+    
+    today_missions = []
+    
+    for mission in missions:
+        # Verificar si la misión está activa para hoy
+        if is_mission_active_today(mission, st.session_state.current_date):
+            # Verificar si ya fue completada hoy
+            completed_today = any(
+                log["mission_id"] == mission["id"] and 
+                log["date"] == today and 
+                log["status"] == "completed"
+                for log in mission_log
+            )
+            
+            mission_copy = mission.copy()
+            mission_copy["completed"] = completed_today
+            mission_copy["completion_data"] = next(
+                (log for log in mission_log 
+                 if log["mission_id"] == mission["id"] and log["date"] == today),
+                None
+            )
+            today_missions.append(mission_copy)
+    
+    return today_missions
+
+def is_mission_active_today(mission: Dict, target_date: date) -> bool:
+    """Determina si una misión está activa para una fecha específica"""
+    start_date = datetime.fromisoformat(mission.get("start_date", "2000-01-01")).date()
+    end_date = datetime.fromisoformat(mission["end_date"]).date() if mission.get("end_date") else None
+    
+    if target_date < start_date:
+        return False
+    
+    if end_date and target_date > end_date:
+        return False
+    
+    mission_type = mission.get("type", "daily")
+    recurrence = mission.get("recurrence", "everyday")
+    
+    if mission_type == "daily":
+        if recurrence == "everyday":
+            return True
+        elif recurrence == "weekdays" and target_date.weekday() < 5:
+            return True
+        elif recurrence == "weekends" and target_date.weekday() >= 5:
+            return True
+    
+    elif mission_type == "weekly":
+        # Misiones semanales específicas
+        if recurrence == "monday" and target_date.weekday() == 0:
+            return True
+        elif recurrence == "tuesday" and target_date.weekday() == 1:
+            return True
+        # ... otros días de la semana
+    
+    elif mission_type == "monthly":
+        # Misiones mensuales (ej: día 1 de cada mes)
+        if recurrence == "first_day" and target_date.day == 1:
+            return True
+    
+    elif mission_type in ["epic", "one_off"]:
+        # Misiones épicas o únicas - siempre activas dentro de su rango de fechas
+        return True
+    
+    return False
+
+def complete_mission(mission_id: str, notes: str = ""):
+    """Completa una misión y otorga recompensas"""
+    today = st.session_state.current_date.isoformat()
+    mission = next(m for m in st.session_state["missions"]["data"]["missions"] if m["id"] == mission_id)
+    
+    log_entry = {
+        "mission_id": mission_id,
+        "date": today,
+        "status": "completed",
+        "xp_awarded": mission["base_xp"],
+        "tokens_awarded": mission["tokens_reward"],
+        "timestamp": datetime.now().isoformat(),
+        "notes": notes,
+    }
+    
+    # Agregar al log
+    st.session_state["mission_log"]["data"].append(log_entry)
+    
+    # Actualizar perfil
+    profile = st.session_state["profile"]["data"]
+    profile["current_xp"] += mission["base_xp"]
+    profile["total_tokens"] += mission["tokens_reward"]
+    
+    # Actualizar atributo si existe
+    if mission.get("attribute_id"):
+        attributes = st.session_state["attributes"]["data"]["attributes"]
+        for attr in attributes:
+            if attr["id"] == mission["attribute_id"]:
+                attr["current_xp"] += mission["base_xp"]
+                break
+    
+    # Verificar si subió de nivel
+    check_level_up()
+
+def check_level_up():
+    """Verifica si el usuario subió de nivel"""
+    profile = st.session_state["profile"]["data"]
+    xp_needed = profile["xp_base_per_level"]
+    
+    while profile["current_xp"] >= xp_needed:
+        profile["current_level"] += 1
+        profile["current_xp"] -= xp_needed
+        # Opcional: incrementar xp necesario para siguiente nivel
+        # xp_needed = int(xp_needed * 1.2)
+
+def get_mission_class(mission_type: str) -> str:
+    """Devuelve la clase CSS para el tipo de misión"""
+    type_classes = {
+        "daily": "mission-daily",
+        "weekly": "mission-weekly",
+        "monthly": "mission-monthly",
+        "epic": "mission-epic"
+    }
+    return type_classes.get(mission_type, "mission-daily")
+
+# =========================================================
 #  AUTENTICACIÓN
 # =========================================================
 
@@ -319,313 +500,916 @@ def login_screen():
 # ---------- DASHBOARD ----------
 
 def page_dashboard():
-    st.header("Dashboard")
-
+    st.header("🏠 Dashboard")
+    
     profile = st.session_state["profile"]["data"]
     level = profile["current_level"]
     xp = profile["current_xp"]
     base = profile["xp_base_per_level"]
-
-    st.subheader(f"Nivel {level}")
+    
+    # Stats principales
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Nivel", level)
+    with col2:
+        st.metric("XP", f"{xp}/{base}")
+    with col3:
+        st.metric("Tokens", profile["total_tokens"])
+    with col4:
+        st.metric("Racha", f"{profile['streak_days']} días")
+    
+    # Barra de progreso
     progress = min(xp / base, 1.0) if base > 0 else 0
     st.progress(progress)
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write(f"XP: {xp} / {base}")
-    with col2:
-        st.write(f"Tokens: {profile['total_tokens']}")
-
+    
     st.markdown("---")
-    st.subheader("Misiones de hoy")
-
-    today = date.today().isoformat()
-    missions = st.session_state["missions"]["data"]["missions"]
-
-    today_missions = []
-    for m in missions:
-        if m["type"] == "daily":
-            today_missions.append(m)
-        elif m["type"] == "weekly":
-            # aquí podrías implementar lógica de días concretos
-            pass
-
+    
+    # Misiones de hoy
+    st.subheader("🎯 Misiones de Hoy")
+    today_missions = get_today_missions()
+    
     if not today_missions:
-        st.info("No tienes misiones diarias configuradas.")
+        st.info("No tienes misiones para hoy. ¡Crea algunas en la pestaña de Misiones!")
     else:
-        for m in today_missions:
-            cols = st.columns([3, 1])
-            with cols[0]:
-                st.write(f"{m['name']} (XP {m['base_xp']}, Tokens {m['tokens_reward']})")
-            with cols[1]:
-                if st.button("Completar", key=f"complete_today_{m['id']}"):
-                    log = {
-                        "mission_id": m["id"],
-                        "date": today,
-                        "status": "completed",
-                        "xp_awarded": m["base_xp"],
-                        "tokens_awarded": m["tokens_reward"],
-                        "timestamp": datetime.now().isoformat(),
-                        "notes": "",
-                    }
-                    st.session_state["mission_log"]["data"].append(log)
-                    profile["current_xp"] += m["base_xp"]
-                    profile["total_tokens"] += m["tokens_reward"]
-                    st.success("Misión completada.")
-                    st.rerun()
+        completed_count = sum(1 for m in today_missions if m.get("completed"))
+        st.write(f"**Progreso: {completed_count}/{len(today_missions)} completadas**")
+        
+        for mission in today_missions:
+            mission_class = get_mission_class(mission["type"])
+            completed = mission.get("completed", False)
+            
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                if completed:
+                    st.markdown(f'<div class="{mission_class} mission-completed">✓ {mission["name"]}</div>', unsafe_allow_html=True)
+                    st.caption(f"{mission['description']} - ✅ Completada")
+                else:
+                    st.markdown(f'<div class="{mission_class}">🎯 {mission["name"]}</div>', unsafe_allow_html=True)
+                    st.caption(f"{mission['description']} - XP: {mission['base_xp']} | Tokens: {mission['tokens_reward']}")
+            
+            with col2:
+                if not completed:
+                    if st.button("Completar", key=f"complete_{mission['id']}"):
+                        complete_mission(mission["id"])
+                        st.rerun()
+                else:
+                    st.success("✅")
+    
+    # Atributos
+    st.markdown("---")
+    st.subheader("📊 Atributos")
+    attributes = st.session_state["attributes"]["data"]["attributes"]
+    
+    cols = st.columns(len(attributes))
+    for idx, attr in enumerate(attributes):
+        with cols[idx]:
+            st.write(f"**{attr['name']}**")
+            st.write(f"XP: {attr['current_xp']}")
+            st.caption(attr.get('description', ''))
 
-# ---------- CALENDARIO ----------
+# ---------- CALENDARIO AVANZADO ----------
 
 def page_calendar():
-    st.header("Calendario")
-
-    events = st.session_state["calendar"]["data"]["events"]
-
-    st.subheader("Eventos existentes")
-    if not events:
-        st.info("Todavía no hay eventos en el calendario.")
+    st.header("📅 Calendario Estratégico")
+    
+    # Controles de navegación
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col1:
+        if st.button("◀ Mes Anterior"):
+            if st.session_state.calendar_view == "month":
+                st.session_state.current_date = st.session_state.current_date.replace(day=1) - timedelta(days=1)
+            else:
+                st.session_state.current_date -= timedelta(days=7)
+    with col2:
+        view_option = st.radio("Vista", ["Mes", "Semana", "Día"], horizontal=True, key="view_selector")
+        st.session_state.calendar_view = view_option.lower()
+    with col3:
+        if st.button("Mes Siguiente ▶"):
+            if st.session_state.calendar_view == "month":
+                next_month = st.session_state.current_date.replace(day=28) + timedelta(days=4)
+                st.session_state.current_date = next_month.replace(day=1)
+            else:
+                st.session_state.current_date += timedelta(days=7)
+    
+    # Reset a hoy
+    if st.button("Hoy"):
+        st.session_state.current_date = date.today()
+    
+    st.write(f"**Vista: {st.session_state.current_date.strftime('%B %Y')}**")
+    
+    if st.session_state.calendar_view == "mes":
+        render_month_view()
+    elif st.session_state.calendar_view == "semana":
+        render_week_view()
     else:
-        for ev in sorted(events, key=lambda e: (e["date"], e["start_time"])):
-            st.write(f"{ev['date']} {ev['start_time']}-{ev['end_time']} — {ev['title']}")
+        render_day_view()
 
-    st.markdown("---")
-    st.subheader("Añadir evento")
+def render_month_view():
+    """Renderiza vista mensual del calendario"""
+    current_date = st.session_state.current_date
+    year = current_date.year
+    month = current_date.month
+    
+    # Obtener primer día del mes y número de días
+    first_day = date(year, month, 1)
+    last_day = date(year, month + 1, 1) - timedelta(days=1) if month < 12 else date(year + 1, 1, 1) - timedelta(days=1)
+    
+    # Crear encabezados de días
+    days = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+    cols = st.columns(7)
+    for i, day in enumerate(days):
+        cols[i].write(f"**{day}**")
+    
+    # Crear calendario
+    cal_rows = []
+    current_row = [None] * 7
+    
+    # Rellenar días del mes anterior
+    start_weekday = first_day.weekday()
+    prev_month_last_day = first_day - timedelta(days=1)
+    
+    for i in range(start_weekday):
+        prev_day = prev_month_last_day - timedelta(days=start_weekday - i - 1)
+        current_row[i] = prev_day
+    
+    # Rellenar días del mes actual
+    current_day = first_day
+    while current_day <= last_day:
+        current_row[start_weekday] = current_day
+        start_weekday += 1
+        
+        if start_weekday == 7 or current_day == last_day:
+            cal_rows.append(current_row.copy())
+            current_row = [None] * 7
+            start_weekday = 0
+        
+        current_day += timedelta(days=1)
+    
+    # Renderizar calendario
+    for row in cal_rows:
+        cols = st.columns(7)
+        for i, day_date in enumerate(row):
+            with cols[i]:
+                if day_date:
+                    is_today = day_date == date.today()
+                    day_class = "calendar-day calendar-today" if is_today else "calendar-day"
+                    
+                    st.markdown(f'<div class="{day_class}">', unsafe_allow_html=True)
+                    st.write(f"**{day_date.day}**")
+                    
+                    # Mostrar misiones y eventos para este día
+                    render_day_content(day_date)
+                    
+                    st.markdown('</div>', unsafe_allow_html=True)
+                else:
+                    st.write("")
 
-    title = st.text_input("Título")
-    d = st.date_input("Fecha", value=date.today())
-    start_t = st.time_input("Hora inicio", value=time(8, 0))
-    end_t = st.time_input("Hora fin", value=time(9, 0))
-    notes = st.text_area("Notas")
+def render_week_view():
+    """Renderiza vista semanal"""
+    current_date = st.session_state.current_date
+    start_of_week = current_date - timedelta(days=current_date.weekday())
+    
+    st.write(f"**Semana del {start_of_week.strftime('%d %b')} al {(start_of_week + timedelta(days=6)).strftime('%d %b %Y')}**")
+    
+    cols = st.columns(7)
+    for i in range(7):
+        day_date = start_of_week + timedelta(days=i)
+        with cols[i]:
+            is_today = day_date == date.today()
+            day_name = day_date.strftime('%a')
+            
+            if is_today:
+                st.markdown(f"**🎯 {day_date.day} {day_name}**")
+            else:
+                st.markdown(f"**{day_date.day} {day_name}**")
+            
+            render_day_content(day_date, detailed=True)
 
-    if st.button("Crear evento"):
-        new = {
-            "id": f"ev_{uuid.uuid4().hex}",
-            "type": "generic",
-            "date": d.isoformat(),
-            "start_time": start_t.strftime("%H:%M"),
-            "end_time": end_t.strftime("%H:%M"),
-            "title": title,
-            "notes": notes,
-        }
-        events.append(new)
-        st.success("Evento creado.")
-        st.rerun()
+def render_day_view():
+    """Renderiza vista diaria detallada"""
+    current_date = st.session_state.current_date
+    is_today = current_date == date.today()
+    
+    st.subheader(f"📅 {current_date.strftime('%A, %d de %B de %Y')} {'(HOY)' if is_today else ''}")
+    
+    # Misiones del día
+    st.write("### 🎯 Misiones del Día")
+    today_missions = get_today_missions()
+    
+    if today_missions:
+        for mission in today_missions:
+            completed = mission.get("completed", False)
+            status = "✅" if completed else "⏳"
+            st.write(f"{status} **{mission['name']}**")
+            st.caption(f"{mission['description']} | XP: {mission['base_xp']} | Tokens: {mission['tokens_reward']}")
+            
+            if not completed and st.button("Completar", key=f"day_view_{mission['id']}"):
+                complete_mission(mission["id"])
+                st.rerun()
+    else:
+        st.info("No hay misiones programadas para este día.")
+    
+    # Eventos del calendario
+    st.write("### 🗓️ Eventos Programados")
+    events = st.session_state["calendar"]["data"]["events"]
+    day_events = [e for e in events if e["date"] == current_date.isoformat()]
+    
+    if day_events:
+        for event in sorted(day_events, key=lambda x: x["start_time"]):
+            st.write(f"🕒 **{event['start_time']} - {event['end_time']}**: {event['title']}")
+            if event.get('notes'):
+                st.caption(event['notes'])
+    else:
+        st.info("No hay eventos programados para este día.")
+    
+    # Agregar nuevo evento
+    st.write("### ➕ Agregar Evento")
+    with st.form("add_event_form"):
+        title = st.text_input("Título del evento")
+        event_date = st.date_input("Fecha", value=current_date)
+        start_time = st.time_input("Hora inicio", value=time(8, 0))
+        end_time = st.time_input("Hora fin", value=time(9, 0))
+        notes = st.text_area("Notas")
+        
+        if st.form_submit_button("Agregar Evento"):
+            new_event = {
+                "id": f"ev_{uuid.uuid4().hex}",
+                "title": title,
+                "date": event_date.isoformat(),
+                "start_time": start_time.strftime("%H:%M"),
+                "end_time": end_time.strftime("%H:%M"),
+                "notes": notes,
+                "type": "event"
+            }
+            st.session_state["calendar"]["data"]["events"].append(new_event)
+            st.success("Evento agregado!")
+            st.rerun()
+
+def render_day_content(day_date: date, detailed: bool = False):
+    """Renderiza el contenido de un día en el calendario"""
+    # Misiones para este día
+    temp_date = st.session_state.current_date
+    st.session_state.current_date = day_date
+    day_missions = get_today_missions()
+    st.session_state.current_date = temp_date
+    
+    # Eventos para este día
+    events = st.session_state["calendar"]["data"]["events"]
+    day_events = [e for e in events if e["date"] == day_date.isoformat()]
+    
+    # Mostrar resumen
+    if day_missions:
+        completed = sum(1 for m in day_missions if m.get("completed"))
+        st.caption(f"🎯 {completed}/{len(day_missions)}")
+    
+    if day_events:
+        st.caption(f"🗓️ {len(day_events)}")
+    
+    if detailed:
+        for mission in day_missions[:3]:  # Mostrar máximo 3 misiones
+            status = "✅" if mission.get("completed") else "⏳"
+            st.write(f"{status} {mission['name'][:15]}...")
+        
+        for event in day_events[:2]:  # Mostrar máximo 2 eventos
+            st.write(f"🗓️ {event['title'][:12]}...")
 
 # ---------- MISIONES ----------
 
 def page_missions():
-    st.header("Misiones")
-
-    missions = st.session_state["missions"]["data"]["missions"]
-
-    st.subheader("Lista de misiones")
-    if not missions:
-        st.info("Aún no hay misiones. Crea alguna abajo.")
-    else:
-        for m in missions:
-            st.write(
-                f"- {m['name']} ({m['type']}) — XP {m['base_xp']} / Tokens {m['tokens_reward']}"
-            )
-
-    st.markdown("---")
-    st.subheader("Crear nueva misión")
-
-    name = st.text_input("Nombre de la misión")
-    desc = st.text_area("Descripción")
-    mtype = st.selectbox("Tipo", ["daily", "weekly", "one_off"])
-    xp = st.number_input("XP otorgados", 1, 1000, 10)
-    tokens = st.number_input("Tokens otorgados", 0, 1000, 0)
-
-    if st.button("Crear misión"):
-        if not name.strip():
-            st.error("La misión debe tener un nombre.")
+    st.header("🎯 Sistema de Misiones")
+    
+    tab1, tab2, tab3 = st.tabs(["Todas las Misiones", "Crear Nueva Misión", "Misiones Épicas"])
+    
+    with tab1:
+        missions = st.session_state["missions"]["data"]["missions"]
+        
+        if not missions:
+            st.info("Aún no hay misiones. Crea tu primera misión!")
         else:
-            mid = f"m_{uuid.uuid4().hex}"
-            missions.append(
-                {
-                    "id": mid,
-                    "name": name.strip(),
-                    "description": desc,
-                    "type": mtype,
-                    "base_xp": xp,
-                    "tokens_reward": tokens,
-                }
+            for mission in missions:
+                with st.expander(f"{mission['name']} ({mission['type']})"):
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.write(f"**Descripción:** {mission['description']}")
+                        st.write(f"**XP:** {mission['base_xp']} | **Tokens:** {mission['tokens_reward']}")
+                        st.write(f"**Fecha inicio:** {mission.get('start_date', 'N/A')}")
+                        if mission.get('end_date'):
+                            st.write(f"**Fecha fin:** {mission['end_date']}")
+                        if mission.get('attribute_id'):
+                            st.write(f"**Atributo:** {mission['attribute_id']}")
+                    
+                    with col2:
+                        if st.button("Eliminar", key=f"del_{mission['id']}"):
+                            st.session_state["missions"]["data"]["missions"] = [
+                                m for m in missions if m["id"] != mission["id"]
+                            ]
+                            st.rerun()
+    
+    with tab2:
+        st.subheader("Crear Nueva Misión")
+        
+        with st.form("create_mission"):
+            name = st.text_input("Nombre de la misión *")
+            description = st.text_area("Descripción")
+            mission_type = st.selectbox("Tipo", ["daily", "weekly", "monthly", "epic", "one_off"])
+            base_xp = st.number_input("XP base", 1, 1000, 10)
+            tokens_reward = st.number_input("Tokens de recompensa", 0, 100, 2)
+            
+            # Atributos
+            attributes = st.session_state["attributes"]["data"]["attributes"]
+            attribute_id = st.selectbox(
+                "Atributo relacionado", 
+                [""] + [attr["id"] for attr in attributes]
             )
-            st.success("Misión creada.")
+            
+            # Fechas
+            col1, col2 = st.columns(2)
+            with col1:
+                start_date = st.date_input("Fecha inicio", value=date.today())
+            with col2:
+                end_date = st.date_input("Fecha fin (opcional)", value=None)
+            
+            # Recurrencia según tipo
+            if mission_type == "daily":
+                recurrence = st.selectbox("Recurrencia", ["everyday", "weekdays", "weekends"])
+            elif mission_type == "weekly":
+                recurrence = st.selectbox("Día de la semana", [
+                    "monday", "tuesday", "wednesday", "thursday", 
+                    "friday", "saturday", "sunday"
+                ])
+            elif mission_type == "monthly":
+                recurrence = st.selectbox("Tipo mensual", ["first_day", "last_day"])
+            else:
+                recurrence = "once"
+            
+            priority = st.selectbox("Prioridad", ["low", "medium", "high"])
+            
+            if st.form_submit_button("Crear Misión"):
+                if not name.strip():
+                    st.error("El nombre es obligatorio")
+                else:
+                    new_mission = {
+                        "id": f"m_{uuid.uuid4().hex}",
+                        "name": name.strip(),
+                        "description": description,
+                        "type": mission_type,
+                        "base_xp": base_xp,
+                        "tokens_reward": tokens_reward,
+                        "attribute_id": attribute_id if attribute_id else None,
+                        "start_date": start_date.isoformat(),
+                        "end_date": end_date.isoformat() if end_date else None,
+                        "recurrence": recurrence,
+                        "priority": priority
+                    }
+                    st.session_state["missions"]["data"]["missions"].append(new_mission)
+                    st.success("Misión creada exitosamente!")
+                    st.rerun()
+    
+    with tab3:
+        st.subheader("Misiones Épicas")
+        st.info("""
+        Las Misiones Épicas son tus grandes objetivos a largo plazo. 
+        Estas se dividen en misiones más pequeñas que aparecen en tu día a día.
+        
+        **Ejemplos:**
+        - Aprender un nuevo idioma
+        - Escribir un libro
+        - Cambiar de carrera
+        - Lograr una meta física específica
+        """)
+        
+        epic_missions = [
+            m for m in st.session_state["missions"]["data"]["missions"] 
+            if m["type"] == "epic"
+        ]
+        
+        if not epic_missions:
+            st.warning("No tienes misiones épicas definidas. ¡Es hora de soñar en grande!")
+        
+        if st.button("Crear Misión Épica"):
+            st.session_state["missions"]["data"]["missions"].append({
+                "id": f"epic_{uuid.uuid4().hex}",
+                "name": "Mi Gran Misión",
+                "description": "Describe tu objetivo más ambicioso...",
+                "type": "epic",
+                "base_xp": 100,
+                "tokens_reward": 50,
+                "attribute_id": None,
+                "start_date": date.today().isoformat(),
+                "end_date": (date.today() + timedelta(days=365)).isoformat(),
+                "recurrence": "yearly",
+                "priority": "high"
+            })
             st.rerun()
 
 # ---------- JOURNAL ----------
 
 def page_journal():
-    st.header("Registro diario")
-
-    attrs = st.session_state["attributes"]["data"]["attributes"]
-
-    entry = st.text_area("Escribe tu registro del día:")
-    attr_ids = st.multiselect(
-        "Atributos relacionados", [a["id"] for a in attrs]
+    st.header("📔 Registro Diario")
+    
+    today = date.today().isoformat()
+    
+    # Entrada del día actual
+    st.subheader("Registro de Hoy")
+    
+    # Verificar si ya existe un registro para hoy
+    existing_entry = next(
+        (entry for entry in st.session_state["journal"]["data"] 
+         if entry["date"] == today),
+        None
     )
-    xp = st.number_input("XP a otorgar (manual)", 0, 200, 10)
-
-    if st.button("Guardar registro"):
-        log = {
-            "id": f"j_{uuid.uuid4().hex}",
-            "date": date.today().isoformat(),
-            "timestamp": datetime.now().isoformat(),
-            "text": entry,
-            "attribute_ids": attr_ids,
-            "xp_awarded": xp,
-        }
-        st.session_state["journal"]["data"].append(log)
-        st.success("Registro guardado.")
-
+    
+    with st.form("journal_entry"):
+        if existing_entry:
+            default_text = existing_entry["text"]
+        else:
+            default_text = ""
+        
+        entry_text = st.text_area(
+            "¿Cómo fue tu día? ¿Qué aprendiste? ¿Qué podrías mejorar?",
+            value=default_text,
+            height=200
+        )
+        
+        # Atributos relacionados
+        attributes = st.session_state["attributes"]["data"]["attributes"]
+        attribute_ids = st.multiselect(
+            "Atributos trabajados hoy",
+            [attr["id"] for attr in attributes],
+            default=existing_entry.get("attribute_ids", []) if existing_entry else []
+        )
+        
+        # XP manual por logros no cubiertos por misiones
+        xp_manual = st.number_input(
+            "XP adicional (por logros no estructurados)",
+            0, 200,
+            value=existing_entry.get("xp_awarded", 10) if existing_entry else 10
+        )
+        
+        # Estado de ánimo
+        mood = st.select_slider(
+            "Estado de ánimo",
+            options=["😔", "😐", "😊", "🤩"],
+            value=existing_entry.get("mood", "😊") if existing_entry else "😊"
+        )
+        
+        submitted = st.form_submit_button("Guardar Registro")
+        
+        if submitted:
+            journal_entry = {
+                "id": existing_entry["id"] if existing_entry else f"j_{uuid.uuid4().hex}",
+                "date": today,
+                "timestamp": datetime.now().isoformat(),
+                "text": entry_text,
+                "attribute_ids": attribute_ids,
+                "xp_awarded": xp_manual,
+                "mood": mood
+            }
+            
+            if existing_entry:
+                # Actualizar entrada existente
+                index = next(
+                    i for i, entry in enumerate(st.session_state["journal"]["data"])
+                    if entry["date"] == today
+                )
+                st.session_state["journal"]["data"][index] = journal_entry
+            else:
+                # Crear nueva entrada
+                st.session_state["journal"]["data"].append(journal_entry)
+                
+                # Otorgar XP manual
+                st.session_state["profile"]["data"]["current_xp"] += xp_manual
+            
+            st.success("Registro guardado!")
+            st.rerun()
+    
     st.markdown("---")
-    st.subheader("Historial")
-
-    logs = sorted(
+    
+    # Historial
+    st.subheader("Historial de Registros")
+    
+    journal_entries = sorted(
         st.session_state["journal"]["data"],
-        key=lambda x: x["timestamp"],
-        reverse=True,
+        key=lambda x: x["date"],
+        reverse=True
     )
-    if not logs:
-        st.info("Todavía no tienes registros.")
+    
+    if not journal_entries:
+        st.info("Aún no tienes registros. ¡Comienza hoy!")
     else:
-        for l in logs[:50]:
-            st.write(f"{l['date']} — {l['text']}")
+        for entry in journal_entries[:10]:  # Mostrar últimos 10 registros
+            with st.expander(f"{entry['date']} - {entry.get('mood', '😊')} - XP: {entry.get('xp_awarded', 0)}"):
+                st.write(entry["text"])
+                if entry.get("attribute_ids"):
+                    st.caption(f"Atributos: {', '.join(entry['attribute_ids'])}")
 
 # ---------- GAME THEORY LAB ----------
 
 def page_decisions():
-    st.header("Game Theory Lab")
-
-    st.subheader("Evaluar una decisión")
-
-    situation = st.text_input("Describe la situación")
-    opt1 = st.text_input("Opción A")
-    opt2 = st.text_input("Opción B")
-
-    shortA = st.slider("Payoff corto plazo A", 1, 10, 5)
-    longA = st.slider("Payoff largo plazo A", 1, 10, 5)
-
-    shortB = st.slider("Payoff corto plazo B", 1, 10, 5)
-    longB = st.slider("Payoff largo plazo B", 1, 10, 5)
-
-    if st.button("Registrar decisión"):
-        entry = {
-            "id": f"d_{uuid.uuid4().hex}",
-            "timestamp": datetime.now().isoformat(),
-            "situation": situation,
-            "options": [
-                {
-                    "name": opt1,
-                    "short_term_payoff": shortA,
-                    "long_term_payoff": longA,
-                },
-                {
-                    "name": opt2,
-                    "short_term_payoff": shortB,
-                    "long_term_payoff": longB,
-                },
-            ],
-            "chosen_option": None,
-            "reason": None,
-            "regret_check": None,
-        }
-        st.session_state["decisions"]["data"].append(entry)
-        st.success("Decisión registrada.")
-
-    st.markdown("---")
-    st.subheader("Historial de decisiones")
-
-    decs = sorted(
-        st.session_state["decisions"]["data"],
-        key=lambda x: x["timestamp"],
-        reverse=True,
-    )
-    if not decs:
-        st.info("Sin decisiones registradas aún.")
-    else:
-        for d in decs[:50]:
-            st.write(f"{d['timestamp']} — {d['situation']}")
+    st.header("🎲 Game Theory Lab")
+    
+    st.info("""
+    **Teoría de Juegos Aplicada a tu Vida:**
+    Cada decisión es una jugada en un juego repetido contra tu yo futuro.
+    - **Cooperar** = Elegir el payoff a largo plazo
+    - **Traicionar** = Elegir el payoff a corto plazo
+    """)
+    
+    tab1, tab2, tab3 = st.tabs(["Nueva Decisión", "Historial", "Análisis de Patrones"])
+    
+    with tab1:
+        st.subheader("Evaluar Decisión Estratégica")
+        
+        with st.form("decision_form"):
+            situation = st.text_input("Describe la situación decisiva:")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("**Opción A**")
+                opt1_name = st.text_input("Nombre Opción A", placeholder="Ej: Trabajar en proyecto")
+                opt1_short = st.slider("Payoff corto plazo A", 1, 10, 3, 
+                                      help="Gratificación inmediata (1=bajo, 10=alto)")
+                opt1_long = st.slider("Payoff largo plazo A", 1, 10, 8,
+                                     help="Beneficio futuro (1=bajo, 10=alto)")
+            
+            with col2:
+                st.write("**Opción B**")
+                opt2_name = st.text_input("Nombre Opción B", placeholder="Ej: Ver redes sociales")
+                opt2_short = st.slider("Payoff corto plazo B", 1, 10, 8)
+                opt2_long = st.slider("Payoff largo plazo B", 1, 10, 2)
+            
+            # Análisis automático
+            total_a = opt1_short + opt1_long
+            total_b = opt2_short + opt2_long
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Puntaje Total A", total_a)
+            with col2:
+                st.metric("Puntaje Total B", total_b)
+            
+            # Determinar dominancia
+            if opt1_short >= opt2_short and opt1_long >= opt2_long:
+                if opt1_short > opt2_short or opt1_long > opt2_long:
+                    st.success("🎯 **Opción A DOMINA** a la Opción B")
+                else:
+                    st.info("⚖️ Las opciones son equivalentes")
+            elif opt2_short >= opt1_short and opt2_long >= opt1_long:
+                if opt2_short > opt1_short or opt2_long > opt1_long:
+                    st.success("🎯 **Opción B DOMINA** a la Opción A")
+                else:
+                    st.info("⚖️ Las opciones son equivalentes")
+            else:
+                st.warning("⚡ **Trade-off**: Cada opción tiene ventajas diferentes")
+            
+            chosen_option = st.radio("¿Cuál opción elegiste?", 
+                                   [f"A: {opt1_name}", f"B: {opt2_name}", "Todavía no decido"])
+            reason = st.text_area("Razón de tu elección:")
+            
+            if st.form_submit_button("Registrar Decisión"):
+                if not situation.strip() or not opt1_name.strip() or not opt2_name.strip():
+                    st.error("Completa todos los campos obligatorios")
+                else:
+                    decision = {
+                        "id": f"d_{uuid.uuid4().hex}",
+                        "timestamp": datetime.now().isoformat(),
+                        "situation": situation,
+                        "options": [
+                            {
+                                "name": opt1_name,
+                                "short_term_payoff": opt1_short,
+                                "long_term_payoff": opt1_long,
+                                "total_score": total_a
+                            },
+                            {
+                                "name": opt2_name,
+                                "short_term_payoff": opt2_short,
+                                "long_term_payoff": opt2_long,
+                                "total_score": total_b
+                            }
+                        ],
+                        "chosen_option": chosen_option,
+                        "reason": reason,
+                        "regret_check": None,
+                        "regret_notes": None
+                    }
+                    st.session_state["decisions"]["data"].append(decision)
+                    st.success("Decisión registrada para análisis futuro!")
+                    st.rerun()
+    
+    with tab2:
+        st.subheader("Historial de Decisiones")
+        
+        decisions = sorted(
+            st.session_state["decisions"]["data"],
+            key=lambda x: x["timestamp"],
+            reverse=True
+        )
+        
+        if not decisions:
+            st.info("Aún no has registrado decisiones.")
+        else:
+            for decision in decisions[:20]:
+                with st.expander(f"{decision['timestamp'][:10]} - {decision['situation'][:50]}..."):
+                    st.write(f"**Situación:** {decision['situation']}")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        opt_a = decision["options"][0]
+                        st.write(f"**A: {opt_a['name']}**")
+                        st.write(f"Corto: {opt_a['short_term_payoff']}/10")
+                        st.write(f"Largo: {opt_a['long_term_payoff']}/10")
+                        st.write(f"Total: {opt_a['total_score']}/20")
+                    
+                    with col2:
+                        opt_b = decision["options"][1]
+                        st.write(f"**B: {opt_b['name']}**")
+                        st.write(f"Corto: {opt_b['short_term_payoff']}/10")
+                        st.write(f"Largo: {opt_b['long_term_payoff']}/10")
+                        st.write(f"Total: {opt_b['total_score']}/20")
+                    
+                    st.write(f"**Elegiste:** {decision['chosen_option']}")
+                    if decision.get('reason'):
+                        st.write(f"**Razón:** {decision['reason']}")
+                    
+                    # Check de arrepentimiento
+                    if decision.get('regret_check') is None:
+                        if st.button("¿Te arrepientes?", key=f"regret_{decision['id']}"):
+                            decision['regret_check'] = True
+                            decision['regret_notes'] = "Arrepentimiento registrado"
+                            st.rerun()
+                    else:
+                        st.write(f"**Arrepentimiento:** {decision.get('regret_notes', 'Sí')}")
+    
+    with tab3:
+        st.subheader("Análisis de Patrones")
+        
+        decisions = st.session_state["decisions"]["data"]
+        if len(decisions) < 3:
+            st.info("Necesitas al menos 3 decisiones registradas para ver análisis.")
+        else:
+            # Estadísticas simples
+            total_decisions = len(decisions)
+            regret_decisions = sum(1 for d in decisions if d.get('regret_check'))
+            avg_short_term = sum(
+                max(opt['short_term_payoff'] for opt in d['options']) 
+                for d in decisions
+            ) / total_decisions
+            avg_long_term = sum(
+                max(opt['long_term_payoff'] for opt in d['options']) 
+                for d in decisions
+            ) / total_decisions
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Decisiones", total_decisions)
+            with col2:
+                st.metric("Tasa Arrepentimiento", f"{(regret_decisions/total_decisions)*100:.1f}%")
+            with col3:
+                st.metric("Balance Corto/Largo", f"{avg_short_term:.1f}/{avg_long_term:.1f}")
+            
+            st.write("**Recomendación:**")
+            if avg_short_term > avg_long_term + 2:
+                st.warning("⚠️ Estás priorizando mucho el corto plazo. Considera más decisiones que beneficien a tu yo futuro.")
+            elif avg_long_term > avg_short_term + 2:
+                st.success("✅ Excelente balance! Estás cooperando consistentemente con tu yo futuro.")
+            else:
+                st.info("🔍 Balance equilibrado. Sigue evaluando cada situación individualmente.")
 
 # ---------- RECOMPENSAS ----------
 
 def page_rewards():
-    st.header("Recompensas")
-
-    rewards = st.session_state["rewards"]["data"]["rewards"]
-    redemptions = st.session_state["rewards"]["data"]["redemptions"]
+    st.header("🏆 Sistema de Recompensas")
+    
     profile = st.session_state["profile"]["data"]
-
-    st.subheader("Tienda")
-
-    if not rewards:
-        st.info("Todavía no hay recompensas definidas.")
-    else:
-        for r in rewards:
-            cols = st.columns([3, 1])
-            with cols[0]:
-                st.write(f"{r['name']} — Costo: {r['cost_tokens']} tokens")
-            with cols[1]:
-                if profile["total_tokens"] >= r["cost_tokens"]:
-                    if st.button("Canjear", key=f"redeem_{r['id']}"):
-                        profile["total_tokens"] -= r["cost_tokens"]
-                        redemptions.append(
-                            {
-                                "id": f"red_{uuid.uuid4().hex}",
-                                "reward_id": r["id"],
-                                "date": date.today().isoformat(),
-                                "tokens_spent": r["cost_tokens"],
-                            }
-                        )
-                        st.success("Recompensa canjeada.")
-                        st.rerun()
-                else:
-                    st.write("Sin tokens suficientes.")
-
-    st.markdown("---")
-    st.subheader("Crear recompensa")
-
-    rname = st.text_input("Nombre de la recompensa")
-    cost = st.number_input("Costo en tokens", 0, 1000, 0)
-
-    if st.button("Crear recompensa"):
-        if not rname.strip():
-            st.error("La recompensa debe tener nombre.")
+    rewards_data = st.session_state["rewards"]["data"]
+    rewards = rewards_data["rewards"]
+    redemptions = rewards_data["redemptions"]
+    
+    st.metric("Tokens Disponibles", profile["total_tokens"])
+    
+    tab1, tab2, tab3 = st.tabs(["Tienda", "Canjear Recompensa", "Historial"])
+    
+    with tab1:
+        st.subheader("🎁 Recompensas Disponibles")
+        
+        if not rewards:
+            st.info("No hay recompensas definidas. Crea algunas!")
         else:
-            rid = f"r_{uuid.uuid4().hex}"
-            rewards.append({"id": rid, "name": rname.strip(), "cost_tokens": cost})
-            st.success("Recompensa creada.")
-            st.rerun()
+            for reward in rewards:
+                col1, col2, col3 = st.columns([3, 1, 1])
+                with col1:
+                    st.write(f"**{reward['name']}**")
+                    st.caption(reward.get('description', ''))
+                    st.write(f"**Costo:** {reward['cost_tokens']} tokens")
+                
+                with col2:
+                    can_afford = profile["total_tokens"] >= reward["cost_tokens"]
+                    if can_afford:
+                        if st.button("Canjear", key=f"buy_{reward['id']}"):
+                            # Procesar canje
+                            profile["total_tokens"] -= reward["cost_tokens"]
+                            redemption = {
+                                "id": f"red_{uuid.uuid4().hex}",
+                                "reward_id": reward["id"],
+                                "date": date.today().isoformat(),
+                                "tokens_spent": reward["cost_tokens"],
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            redemptions.append(redemption)
+                            st.success(f"¡Canjeado! Disfruta de: {reward['name']}")
+                            st.rerun()
+                    else:
+                        st.write(f"Necesitas {reward['cost_tokens'] - profile['total_tokens']} tokens más")
+                
+                with col3:
+                    st.write("")  # Espacio vacío para alineación
+                
+                st.markdown("---")
+        
+        # Crear nueva recompensa
+        st.subheader("➕ Crear Nueva Recompensa")
+        with st.form("create_reward"):
+            rname = st.text_input("Nombre de la recompensa")
+            rdesc = st.text_area("Descripción")
+            cost = st.number_input("Costo en tokens", 1, 1000, 10)
+            category = st.selectbox("Categoría", ["leisure", "reward", "experience", "item"])
+            
+            if st.form_submit_button("Crear Recompensa"):
+                if not rname.strip():
+                    st.error("El nombre es obligatorio")
+                else:
+                    new_reward = {
+                        "id": f"r_{uuid.uuid4().hex}",
+                        "name": rname.strip(),
+                        "description": rdesc,
+                        "cost_tokens": cost,
+                        "category": category
+                    }
+                    rewards.append(new_reward)
+                    st.success("Recompensa creada!")
+                    st.rerun()
+    
+    with tab2:
+        st.subheader("🎯 Recompensas Recomendadas")
+        
+        # Recompensas que puedes costear
+        affordable = [r for r in rewards if r["cost_tokens"] <= profile["total_tokens"]]
+        
+        if not affordable:
+            st.info("Ahorra más tokens para desbloquear recompensas!")
+        else:
+            st.write("**Puedes costear estas recompensas ahora:**")
+            for reward in affordable:
+                if st.button(f"Canjear: {reward['name']} - {reward['cost_tokens']} tokens", 
+                           key=f"quick_{reward['id']}"):
+                    profile["total_tokens"] -= reward["cost_tokens"]
+                    redemption = {
+                        "id": f"red_{uuid.uuid4().hex}",
+                        "reward_id": reward["id"],
+                        "date": date.today().isoformat(),
+                        "tokens_spent": reward["cost_tokens"],
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    redemptions.append(redemption)
+                    st.success(f"¡Disfruta de {reward['name']}!")
+                    st.rerun()
+    
+    with tab3:
+        st.subheader("📊 Historial de Canjes")
+        
+        if not redemptions:
+            st.info("Aún no has canjeado recompensas.")
+        else:
+            total_spent = sum(r["tokens_spent"] for r in redemptions)
+            st.write(f"**Total gastado en recompensas:** {total_spent} tokens")
+            
+            for redemption in sorted(redemptions, key=lambda x: x["date"], reverse=True)[:10]:
+                reward = next(r for r in rewards if r["id"] == redemption["reward_id"])
+                st.write(f"**{redemption['date']}** - {reward['name']} (-{redemption['tokens_spent']} tokens)")
 
 # ---------- CONFIGURACIÓN ----------
 
 def page_config():
-    st.header("Configuración")
-
-    cfg = st.session_state["config"]["data"]
-
-    st.subheader("Parámetros de XP")
-    new_base = st.number_input(
-        "XP base para subir de nivel",
-        10,
-        10000,
-        cfg.get("xp_base_per_level", 100),
-    )
-    if st.button("Guardar configuración"):
-        cfg["xp_base_per_level"] = new_base
-        st.success("Configuración actualizada.")
-
-    st.markdown("---")
-    st.subheader("Persistencia en GitHub")
-
-    if st.button("Guardar TODOS los datos en GitHub"):
-        save_all_user_data(st.session_state.username)
-        st.success("Datos guardados.")
-
-    if st.button("Recargar datos desde GitHub"):
-        load_all_user_data(st.session_state.username)
-        st.success("Datos recargados.")
+    st.header("⚙️ Configuración del Sistema")
+    
+    tab1, tab2, tab3 = st.tabs(["Ajustes", "Datos", "Estadísticas"])
+    
+    with tab1:
+        st.subheader("Ajustes del Juego")
+        
+        config = st.session_state["config"]["data"]
+        profile = st.session_state["profile"]["data"]
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            new_base_xp = st.number_input(
+                "XP necesario para subir de nivel",
+                10, 10000, config.get("xp_base_per_level", 100)
+            )
+            
+            xp_formula = st.selectbox(
+                "Fórmula de progresión de nivel",
+                ["linear", "exponential", "custom"],
+                index=0
+            )
+        
+        with col2:
+            start_week_on = st.selectbox(
+                "La semana comienza en",
+                ["monday", "sunday"],
+                index=0
+            )
+            
+            default_view = st.selectbox(
+                "Vista por defecto del calendario",
+                ["month", "week", "day"],
+                index=0
+            )
+        
+        if st.button("Guardar Configuración"):
+            config["xp_base_per_level"] = new_base_xp
+            config["xp_formula"] = xp_formula
+            config["calendar_start_week_on"] = start_week_on
+            config["default_view"] = default_view
+            st.success("Configuración guardada!")
+    
+    with tab2:
+        st.subheader("Gestión de Datos")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("💾 Guardar en GitHub"):
+                save_all_user_data(st.session_state.username)
+                st.success("Todos los datos guardados en GitHub!")
+            
+            if st.button("🔄 Recargar desde GitHub"):
+                load_all_user_data(st.session_state.username)
+                st.success("Datos recargados desde GitHub!")
+        
+        with col2:
+            if st.button("📊 Exportar Datos"):
+                # Crear un objeto con todos los datos para exportar
+                export_data = {
+                    "profile": st.session_state["profile"]["data"],
+                    "missions": st.session_state["missions"]["data"],
+                    "attributes": st.session_state["attributes"]["data"],
+                    "mission_log": st.session_state["mission_log"]["data"],
+                    "journal": st.session_state["journal"]["data"],
+                    "decisions": st.session_state["decisions"]["data"],
+                    "export_date": datetime.now().isoformat()
+                }
+                
+                st.download_button(
+                    label="Descargar JSON",
+                    data=json.dumps(export_data, indent=2),
+                    file_name=f"lifegame_export_{date.today().isoformat()}.json",
+                    mime="application/json"
+                )
+            
+            if st.button("🆕 Reiniciar Progreso", type="secondary"):
+                if st.checkbox("¿Estás seguro? Esta acción no se puede deshacer"):
+                    st.session_state["profile"]["data"] = DEFAULT_PROFILE.copy()
+                    st.session_state["mission_log"]["data"] = []
+                    st.success("Progreso reiniciado!")
+    
+    with tab3:
+        st.subheader("Estadísticas del Jugador")
+        
+        profile = st.session_state["profile"]["data"]
+        mission_log = st.session_state["mission_log"]["data"]
+        journal = st.session_state["journal"]["data"]
+        decisions = st.session_state["decisions"]["data"]
+        
+        # Calcular estadísticas
+        total_missions_completed = len(mission_log)
+        total_xp_earned = sum(log.get("xp_awarded", 0) for log in mission_log)
+        total_tokens_earned = sum(log.get("tokens_awarded", 0) for log in mission_log)
+        total_journal_entries = len(journal)
+        total_decisions = len(decisions)
+        
+        days_active = len(set(log["date"] for log in mission_log))
+        avg_missions_per_day = total_missions_completed / days_active if days_active > 0 else 0
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Nivel Actual", profile["current_level"])
+            st.metric("Misiones Completadas", total_missions_completed)
+            st.metric("XP Total Ganado", total_xp_earned)
+            st.metric("Días Activos", days_active)
+        
+        with col2:
+            st.metric("Tokens Ganados", total_tokens_earned)
+            st.metric("Entradas de Diario", total_journal_entries)
+            st.metric("Decisiones Registradas", total_decisions)
+            st.metric("Misiones/Día Promedio", f"{avg_missions_per_day:.1f}")
+        
+        # Progreso de atributos
+        st.subheader("Progreso de Atributos")
+        attributes = st.session_state["attributes"]["data"]["attributes"]
+        for attr in attributes:
+            st.write(f"**{attr['name']}:** {attr['current_xp']} XP")
+            # Podrías agregar una barra de progreso aquí si quisieras
 
 # =========================================================
 #  ROUTING
@@ -639,33 +1423,48 @@ if not st.session_state.authenticated:
 
 username = st.session_state.username
 
-st.sidebar.title("LifeGame Theory")
-st.sidebar.write(f"Usuario: {username}")
+# Sidebar
+st.sidebar.title("🎮 LifeGame Theory")
+st.sidebar.write(f"**Jugador:** {username}")
 
+# Navegación
 menu = st.sidebar.radio(
-    "Menú",
+    "Navegación",
     [
-        "Dashboard",
-        "Calendario",
-        "Misiones",
-        "Registro diario",
-        "Decisiones",
-        "Recompensas",
-        "Configuración",
-    ],
+        "🏠 Dashboard",
+        "📅 Calendario",
+        "🎯 Misiones", 
+        "📔 Diario",
+        "🎲 Decisiones",
+        "🏆 Recompensas",
+        "⚙️ Configuración"
+    ]
 )
 
-if menu == "Dashboard":
+# Estado rápido en sidebar
+profile = st.session_state["profile"]["data"]
+st.sidebar.markdown("---")
+st.sidebar.write(f"**Nivel {profile['current_level']}**")
+st.sidebar.write(f"XP: {profile['current_xp']}/{profile['xp_base_per_level']}")
+st.sidebar.write(f"Tokens: {profile['total_tokens']}")
+
+# Guardado automático
+if st.sidebar.button("💾 Guardar Todo"):
+    save_all_user_data(username)
+    st.sidebar.success("Guardado!")
+
+# Routing de páginas
+if menu == "🏠 Dashboard":
     page_dashboard()
-elif menu == "Calendario":
+elif menu == "📅 Calendario":
     page_calendar()
-elif menu == "Misiones":
+elif menu == "🎯 Misiones":
     page_missions()
-elif menu == "Registro diario":
+elif menu == "📔 Diario":
     page_journal()
-elif menu == "Decisiones":
+elif menu == "🎲 Decisiones":
     page_decisions()
-elif menu == "Recompensas":
+elif menu == "🏆 Recompensas":
     page_rewards()
-elif menu == "Configuración":
+elif menu == "⚙️ Configuración":
     page_config()
