@@ -68,12 +68,14 @@ def inject_css():
 # ======================================
 
 def get_valid_users():
-    # Usuarios definidos en secrets.toml, sección [auth]
     try:
-        return dict(st.secrets["auth"])
+        auth_section = st.secrets["auth"]
+        # auth_section es un Mapping; lo convertimos en dict plano
+        return {k: str(auth_section[k]) for k in auth_section}
     except Exception:
-        # Fallback por si no tienes secrets bien configurados
+        # Si no existe [auth], usamos solo demo/demo
         return {"demo": "demo"}
+
 
 
 def github_config():
@@ -273,7 +275,7 @@ def login_view():
             st.success(f"Bienvenido, {username}.")
             init_game_state()
             load_state_from_github(username)
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error("Usuario o contraseña incorrectos.")
 
@@ -361,12 +363,12 @@ if st.sidebar.button("Guardar en GitHub"):
 
 if st.sidebar.button("Cargar desde GitHub"):
     load_state_from_github(st.session_state.username)
-    st.experimental_rerun()
+    st.rerun()
 
 if st.sidebar.button("Cerrar sesion"):
     st.session_state.authenticated = False
     st.session_state.username = None
-    st.experimental_rerun()
+    st.rerun()
 
 
 # ======================================
@@ -486,7 +488,7 @@ elif page == "Misiones y habitos":
                             xp_amount=quest["xp"],
                             source="Mision",
                         )
-                        st.experimental_rerun()
+                        st.rerun()
 
 
 # ======================================
@@ -585,4 +587,4 @@ elif page == "Configuracion":
     if st.button("Resetear todo"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
-        st.experimental_rerun()
+        st.rerun()
