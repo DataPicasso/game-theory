@@ -1,31 +1,80 @@
 import streamlit as st
-import math
 from datetime import date, datetime
 import requests
 import base64
 import json
 
-# =========================
-#   CONFIG INICIAL APP
-# =========================
+# ======================================
+#   CONFIGURACIÓN BÁSICA DE LA APP
+# ======================================
 
 st.set_page_config(
     page_title="LifeRPG",
-    page_icon="🎮",
     layout="wide"
 )
 
-# =========================
-#   AUTH & GITHUB HELPERS
-# =========================
+# ======================================
+#   CSS PARA ESTILO MINIMALISTA
+# ======================================
+
+def inject_css():
+    st.markdown(
+        """
+        <style>
+        /* Fondo y texto generales */
+        body, .stApp {
+            background-color: #FFFFFF;
+            color: #000000;
+        }
+
+        /* Sidebar con borde sutil */
+        section[data-testid="stSidebar"] {
+            border-right: 1px solid #000000;
+        }
+
+        /* Botones minimalistas */
+        div.stButton > button {
+            border: 1px solid #000000;
+            color: #000000;
+            background-color: #FFFFFF;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            transition: all 0.15s ease-in-out;
+            font-weight: 500;
+        }
+        div.stButton > button:hover {
+            background-color: #000000;
+            color: #FFFFFF;
+        }
+
+        /* Formularios e inputs */
+        input, textarea, select {
+            border: 1px solid #000000 !important;
+            border-radius: 4px !important;
+        }
+
+        /* Títulos y secciones */
+        h1, h2, h3, h4 {
+            font-weight: 600;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ======================================
+#   AUTH Y GITHUB HELPERS
+# ======================================
 
 def get_valid_users():
     # Usuarios definidos en secrets.toml, sección [auth]
     try:
         return dict(st.secrets["auth"])
     except Exception:
-        # Fallback por si no tienes secrets bien puestos
+        # Fallback por si no tienes secrets bien configurados
         return {"demo": "demo"}
+
 
 def github_config():
     try:
@@ -33,8 +82,9 @@ def github_config():
         repo = st.secrets["github"]["repo"]
         return token, repo
     except Exception:
-        st.error("No se pudo leer configuración de GitHub desde secrets.toml")
+        st.error("No se pudo leer la configuración de GitHub desde secrets.")
         return None, None
+
 
 def github_file_url(username: str):
     token, repo = github_config()
@@ -43,12 +93,13 @@ def github_file_url(username: str):
     api_url = f"https://api.github.com/repos/{repo}/contents/data/{username}.json"
     headers = {
         "Authorization": f"token {token}",
-        "Accept": "application/vnd.github+json"
+        "Accept": "application/vnd.github+json",
     }
     return api_url, headers, token
 
+
 def export_state():
-    """Convierte st.session_state de juego en un dict serializable."""
+    """Convierte st.session_state en un dict serializable."""
     return {
         "player_name": st.session_state.player_name,
         "level": st.session_state.level,
@@ -71,20 +122,25 @@ def export_state():
         },
     }
 
+
 def import_state(data: dict):
     """Carga los datos guardados en st.session_state."""
-    st.session_state.player_name = data.get("player_name", "Héroe sin nombre")
+    st.session_state.player_name = data.get("player_name", "Heroe sin nombre")
     st.session_state.level = data.get("level", 1)
     st.session_state.xp = data.get("xp", 0)
     st.session_state.base_xp_per_level = data.get("base_xp_per_level", 100)
-    st.session_state.attributes = data.get("attributes", {
-        "Fuerza 💪": 0,
-        "Inteligencia 📚": 0,
-        "Carisma 😎": 0,
-        "Vitalidad ❤️": 0,
-    })
+    st.session_state.attributes = data.get(
+        "attributes",
+        {
+            "Fuerza": 0,
+            "Inteligencia": 0,
+            "Carisma": 0,
+            "Vitalidad": 0,
+        },
+    )
     st.session_state.quests = data.get("quests", [])
-    # logs: reconstruir timestamps
+
+    # Reconstruir logs con timestamps
     raw_logs = data.get("logs", [])
     logs = []
     for log in raw_logs:
@@ -108,6 +164,7 @@ def import_state(data: dict):
         k: set(v_list) for k, v_list in data.get("completed_today", {}).items()
     }
 
+
 def load_state_from_github(username: str):
     api_url, headers, _ = github_file_url(username)
     if not api_url:
@@ -121,12 +178,13 @@ def load_state_from_github(username: str):
         data = json.loads(decoded)
         import_state(data)
         st.session_state.github_sha = body["sha"]
-        st.success("Datos cargados desde GitHub ✅")
+        st.success("Datos cargados desde GitHub.")
     elif resp.status_code == 404:
         st.info("No se encontraron datos en GitHub para este usuario. Empezarás desde cero.")
         st.session_state.github_sha = None
     else:
-        st.error(f"No se pudo cargar desde GitHub (status {resp.status_code})")
+        st.error(f"No se pudo cargar desde GitHub (status {resp.status_code}).")
+
 
 def save_state_to_github(username: str):
     api_url, headers, _ = github_file_url(username)
@@ -148,18 +206,18 @@ def save_state_to_github(username: str):
     if resp.status_code in (200, 201):
         body = resp.json()
         st.session_state.github_sha = body["content"]["sha"]
-        st.success("Datos guardados en GitHub ✅")
+        st.success("Datos guardados en GitHub.")
     else:
-        st.error(f"No se pudo guardar en GitHub (status {resp.status_code})")
+        st.error(f"No se pudo guardar en GitHub (status {resp.status_code}).")
 
 
-# =========================
-#   ESTADO INICIAL DE JUEGO
-# =========================
+# ======================================
+#   ESTADO INICIAL
+# ======================================
 
 def init_game_state():
     if "player_name" not in st.session_state:
-        st.session_state.player_name = "Héroe sin nombre"
+        st.session_state.player_name = "Heroe sin nombre"
     if "level" not in st.session_state:
         st.session_state.level = 1
     if "xp" not in st.session_state:
@@ -168,10 +226,10 @@ def init_game_state():
         st.session_state.base_xp_per_level = 100
     if "attributes" not in st.session_state:
         st.session_state.attributes = {
-            "Fuerza 💪": 0,
-            "Inteligencia 📚": 0,
-            "Carisma 😎": 0,
-            "Vitalidad ❤️": 0,
+            "Fuerza": 0,
+            "Inteligencia": 0,
+            "Carisma": 0,
+            "Vitalidad": 0,
         }
     if "quests" not in st.session_state:
         st.session_state.quests = []
@@ -182,21 +240,24 @@ def init_game_state():
     if "github_sha" not in st.session_state:
         st.session_state.github_sha = None
 
+
 def init_auth_state():
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
     if "username" not in st.session_state:
         st.session_state.username = None
 
+
 init_auth_state()
 
-# =========================
+# ======================================
 #   LOGIN
-# =========================
+# ======================================
 
 def login_view():
-    st.title("🔐 LifeRPG - Login")
-    st.write("Inicia sesión para cargar tus datos desde GitHub.")
+    inject_css()
+    st.title("LifeRPG")
+    st.subheader("Acceso")
 
     users = get_valid_users()
 
@@ -209,33 +270,36 @@ def login_view():
         if username in users and users[username] == password:
             st.session_state.authenticated = True
             st.session_state.username = username
-            st.success(f"Bienvenido, {username} 👋")
-            # Inicializar juego y cargar datos del usuario
+            st.success(f"Bienvenido, {username}.")
             init_game_state()
             load_state_from_github(username)
             st.experimental_rerun()
         else:
             st.error("Usuario o contraseña incorrectos.")
 
-    st.info("Si estás en modo demo, prueba usuario: `demo`, contraseña: `demo`")
+    st.info("Modo demo: usuario 'demo', contraseña 'demo'.")
 
-# =========================
+
+# ======================================
 #   FUNCIONES DEL JUEGO
-# =========================
+# ======================================
 
 def xp_needed_for_next_level(level: int) -> int:
     return st.session_state.base_xp_per_level * level
+
 
 def add_xp(amount: int):
     st.session_state.xp += amount
     while st.session_state.xp >= xp_needed_for_next_level(st.session_state.level):
         st.session_state.xp -= xp_needed_for_next_level(st.session_state.level)
         st.session_state.level += 1
-        st.success(f"🎉 ¡Subiste a nivel {st.session_state.level}!")
+        st.success(f"Nuevo nivel alcanzado: {st.session_state.level}.")
+
 
 def add_attribute_xp(attribute_name: str, amount: int):
     if attribute_name in st.session_state.attributes:
         st.session_state.attributes[attribute_name] += amount
+
 
 def log_action(description: str, attribute: str, xp_amount: int, source: str):
     st.session_state.logs.append(
@@ -248,87 +312,92 @@ def log_action(description: str, attribute: str, xp_amount: int, source: str):
         }
     )
 
+
 def mark_quest_completed(quest_id: int):
     today_str = date.today().isoformat()
     if today_str not in st.session_state.completed_today:
         st.session_state.completed_today[today_str] = set()
     st.session_state.completed_today[today_str].add(quest_id)
 
+
 def is_quest_completed_today(quest_id: int) -> bool:
     today_str = date.today().isoformat()
     return (
-        today_str in st.session_state.completed_today and
-        quest_id in st.session_state.completed_today[today_str]
+        today_str in st.session_state.completed_today
+        and quest_id in st.session_state.completed_today[today_str]
     )
 
-# =========================
-#   SI NO LOGIN → PANTALLA LOGIN
-# =========================
+
+# ======================================
+#   SI NO HAY LOGIN -> PEDIR LOGIN
+# ======================================
 
 if not st.session_state.authenticated:
     login_view()
     st.stop()
 
-# Usuario autenticado → inicializar juego si hace falta
+# Usuario autenticado
+inject_css()
 init_game_state()
 
-# =========================
-#   SIDEBAR NAVEGACIÓN
-# =========================
+# ======================================
+#   SIDEBAR
+# ======================================
 
-st.sidebar.title("🎮 LifeRPG")
-st.sidebar.caption(f"Usuario: **{st.session_state.username}**")
+st.sidebar.title("LifeRPG")
+st.sidebar.caption(f"Usuario: {st.session_state.username}")
 
 page = st.sidebar.radio(
     "Navegación",
-    ["Dashboard", "Misiones & Hábitos", "Registro del día", "Configuración"]
+    ["Dashboard", "Misiones y habitos", "Registro del dia", "Configuracion"],
 )
 
 st.sidebar.markdown("---")
-st.sidebar.write(f"👤 **{st.session_state.player_name}**")
-st.sidebar.write(f"⭐ Nivel: **{st.session_state.level}**")
+st.sidebar.write(f"Personaje: {st.session_state.player_name}")
+st.sidebar.write(f"Nivel: {st.session_state.level}")
 
-if st.sidebar.button("💾 Guardar en GitHub"):
+if st.sidebar.button("Guardar en GitHub"):
     save_state_to_github(st.session_state.username)
 
-if st.sidebar.button("🔄 Cargar desde GitHub"):
+if st.sidebar.button("Cargar desde GitHub"):
     load_state_from_github(st.session_state.username)
     st.experimental_rerun()
 
-if st.sidebar.button("🚪 Cerrar sesión"):
+if st.sidebar.button("Cerrar sesion"):
     st.session_state.authenticated = False
     st.session_state.username = None
     st.experimental_rerun()
 
-# =========================
+
+# ======================================
 #   PANTALLA: DASHBOARD
-# =========================
+# ======================================
 
 if page == "Dashboard":
-    st.title("🏠 Dashboard / HUD")
+    st.title("Dashboard")
 
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        st.subheader(f"👤 {st.session_state.player_name}")
+        st.subheader("Estado del personaje")
         current_level = st.session_state.level
         xp_current = st.session_state.xp
         xp_needed = xp_needed_for_next_level(current_level)
-        st.write(f"Nivel actual: **{current_level}**")
-        st.write(f"XP: **{xp_current}/{xp_needed}**")
+        st.write(f"Nivel actual: {current_level}")
+        st.write(f"Experiencia: {xp_current} / {xp_needed}")
         progress = xp_current / xp_needed if xp_needed > 0 else 0
         st.progress(progress)
 
     with col2:
-        st.subheader("📅 Hoy")
+        st.subheader("Resumen de hoy")
         today = date.today().strftime("%d/%m/%Y")
-        st.write(f"Fecha: **{today}**")
+        st.write(f"Fecha: {today}")
         today_key = date.today().isoformat()
         completed_today = len(st.session_state.completed_today.get(today_key, []))
         st.metric("Misiones completadas hoy", completed_today)
 
     st.markdown("---")
-    st.subheader("📊 Atributos del personaje")
+    st.subheader("Atributos")
 
     cols = st.columns(2)
     items = list(st.session_state.attributes.items())
@@ -337,37 +406,45 @@ if page == "Dashboard":
             st.metric(attr_name, value)
 
     st.markdown("---")
-    st.subheader("📝 Actividad reciente")
+    st.subheader("Actividad reciente")
 
-    recent_logs = sorted(st.session_state.logs, key=lambda x: x["timestamp"], reverse=True)[:10]
+    recent_logs = sorted(
+        st.session_state.logs, key=lambda x: x["timestamp"], reverse=True
+    )[:10]
     if not recent_logs:
-        st.info("Aún no hay actividades registradas. ¡Completa misiones o registra acciones!")
+        st.info("Todavia no hay actividades registradas.")
     else:
         for log in recent_logs:
             ts = log["timestamp"].strftime("%d/%m %H:%M")
             st.write(
-                f"- `{ts}` → **{log['description']}** (+{log['xp']} XP en {log['attribute']}) "
-                f"_({log['source']})_"
+                f"- {ts} | {log['description']} (+{log['xp']} XP en {log['attribute']}) [{log['source']}]"
             )
 
-# =========================
+
+# ======================================
 #   PANTALLA: MISIONES
-# =========================
+# ======================================
 
-elif page == "Misiones & Hábitos":
-    st.title("🗺️ Misiones & Hábitos")
+elif page == "Misiones y habitos":
+    st.title("Misiones y habitos")
 
-    st.subheader("Crear nueva misión")
+    st.subheader("Crear nueva mision")
+
     with st.form("new_quest_form"):
-        q_name = st.text_input("Nombre de la misión", placeholder="Ej: Leer 20 minutos")
-        q_type = st.selectbox("Tipo de misión", ["Diaria", "Semanal", "Épica"])
+        q_name = st.text_input("Nombre de la mision", placeholder="Ejemplo: Leer 20 minutos")
+        q_type = st.selectbox("Tipo de mision", ["Diaria", "Semanal", "Epica"])
         q_attribute = st.selectbox("Atributo principal", list(st.session_state.attributes.keys()))
-        q_xp = st.number_input("XP otorgada al completarla", min_value=1, max_value=1000, value=10)
-        submitted = st.form_submit_button("➕ Añadir misión")
+        q_xp = st.number_input(
+            "Experiencia otorgada al completarla",
+            min_value=1,
+            max_value=1000,
+            value=10,
+        )
+        submitted = st.form_submit_button("Añadir mision")
 
         if submitted:
             if not q_name.strip():
-                st.error("La misión debe tener un nombre.")
+                st.error("La mision debe tener un nombre.")
             else:
                 st.session_state.quests.append(
                     {
@@ -377,58 +454,61 @@ elif page == "Misiones & Hábitos":
                         "xp": int(q_xp),
                     }
                 )
-                st.success("✅ Misión creada.")
+                st.success("Mision creada.")
 
     st.markdown("---")
     st.subheader("Lista de misiones")
 
     if not st.session_state.quests:
-        st.info("No tienes misiones aún. Crea alguna en el formulario de arriba.")
+        st.info("No tienes misiones aun. Crea alguna en el formulario de arriba.")
     else:
         for idx, quest in enumerate(st.session_state.quests):
             completed = is_quest_completed_today(idx)
             cols = st.columns([4, 2, 2, 2])
             with cols[0]:
-                st.write(f"**{quest['name']}**")
+                st.write(quest["name"])
                 st.caption(f"Tipo: {quest['type']}")
             with cols[1]:
                 st.write(f"Atributo: {quest['attribute']}")
             with cols[2]:
-                st.write(f"Recompensa: 🌟 {quest['xp']} XP")
+                st.write(f"Recompensa: {quest['xp']} XP")
             with cols[3]:
                 if completed:
                     st.success("Completada hoy")
                 else:
-                    if st.button("✔️ Completar", key=f"complete_{idx}"):
+                    if st.button("Completar", key=f"complete_{idx}"):
                         add_xp(quest["xp"])
                         add_attribute_xp(quest["attribute"], quest["xp"])
                         mark_quest_completed(idx)
                         log_action(
-                            description=f"Completó misión: {quest['name']}",
+                            description=f"Completó mision: {quest['name']}",
                             attribute=quest["attribute"],
                             xp_amount=quest["xp"],
-                            source="Misión"
+                            source="Mision",
                         )
                         st.experimental_rerun()
 
-# =========================
-#   PANTALLA: REGISTRO DEL DÍA
-# =========================
 
-elif page == "Registro del día":
-    st.title("📓 Registro del día / Journal")
+# ======================================
+#   PANTALLA: REGISTRO DEL DIA
+# ======================================
 
-    st.subheader("Registrar una acción")
+elif page == "Registro del dia":
+    st.title("Registro del dia")
+
+    st.subheader("Registrar una accion")
 
     with st.form("log_action_form"):
-        desc = st.text_input("¿Qué hiciste?", placeholder="Ej: Corrí 3 km")
+        desc = st.text_input("Descripcion", placeholder="Ejemplo: Correr 3 kilometros")
         attr = st.selectbox("Atributo afectado", list(st.session_state.attributes.keys()))
-        xp_amount = st.number_input("XP a otorgar", min_value=1, max_value=500, value=10)
-        submitted = st.form_submit_button("💾 Registrar acción")
+        xp_amount = st.number_input(
+            "Experiencia a otorgar", min_value=1, max_value=500, value=10
+        )
+        submitted = st.form_submit_button("Registrar")
 
         if submitted:
             if not desc.strip():
-                st.error("La descripción no puede estar vacía.")
+                st.error("La descripcion no puede estar vacia.")
             else:
                 add_xp(int(xp_amount))
                 add_attribute_xp(attr, int(xp_amount))
@@ -436,44 +516,47 @@ elif page == "Registro del día":
                     description=desc.strip(),
                     attribute=attr,
                     xp_amount=int(xp_amount),
-                    source="Registro manual"
+                    source="Registro manual",
                 )
-                st.success("✅ Acción registrada.")
+                st.success("Accion registrada.")
 
     st.markdown("---")
     st.subheader("Historial reciente")
 
     if not st.session_state.logs:
-        st.info("Todavía no tienes registros.")
+        st.info("Todavia no tienes registros.")
     else:
-        recent_logs = sorted(st.session_state.logs, key=lambda x: x["timestamp"], reverse=True)[:20]
+        recent_logs = sorted(
+            st.session_state.logs, key=lambda x: x["timestamp"], reverse=True
+        )[:20]
         for log in recent_logs:
             ts = log["timestamp"].strftime("%d/%m %H:%M")
             st.write(
-                f"- `{ts}` → **{log['description']}** (+{log['xp']} XP en {log['attribute']}) "
-                f"_({log['source']})_"
+                f"- {ts} | {log['description']} (+{log['xp']} XP en {log['attribute']}) [{log['source']}]"
             )
 
-# =========================
-#   PANTALLA: CONFIGURACIÓN
-# =========================
 
-elif page == "Configuración":
-    st.title("⚙️ Configuración")
+# ======================================
+#   PANTALLA: CONFIGURACION
+# ======================================
+
+elif page == "Configuracion":
+    st.title("Configuracion")
 
     st.subheader("Datos del personaje")
+
     new_name = st.text_input("Nombre del personaje", value=st.session_state.player_name)
     base_xp = st.number_input(
-        "XP base por nivel (afecta la dificultad)",
+        "Experiencia base por nivel (dificultad)",
         min_value=10,
         max_value=1000,
-        value=st.session_state.base_xp_per_level
+        value=st.session_state.base_xp_per_level,
     )
 
-    if st.button("💾 Guardar configuración de personaje"):
-        st.session_state.player_name = new_name.strip() or "Héroe sin nombre"
+    if st.button("Guardar configuracion de personaje"):
+        st.session_state.player_name = new_name.strip() or "Heroe sin nombre"
         st.session_state.base_xp_per_level = int(base_xp)
-        st.success("Configuración actualizada.")
+        st.success("Configuracion actualizada.")
 
     st.markdown("---")
     st.subheader("Atributos")
@@ -482,9 +565,12 @@ elif page == "Configuración":
     for attr_name, value in st.session_state.attributes.items():
         st.write(f"- {attr_name}: {value} XP")
 
-    st.markdown("### Añadir nuevo atributo")
-    new_attr = st.text_input("Nombre del nuevo atributo (puedes usar emojis)", placeholder="Ej: Creatividad 🎨")
-    if st.button("➕ Añadir atributo"):
+    st.markdown("Añadir nuevo atributo")
+    new_attr = st.text_input(
+        "Nombre del nuevo atributo",
+        placeholder="Ejemplo: Creatividad",
+    )
+    if st.button("Añadir atributo"):
         if not new_attr.strip():
             st.error("El atributo debe tener nombre.")
         elif new_attr in st.session_state.attributes:
@@ -494,9 +580,9 @@ elif page == "Configuración":
             st.success("Atributo añadido.")
 
     st.markdown("---")
-    st.subheader("⚠️ Zona peligrosa")
+    st.subheader("Zona peligrosa")
 
-    if st.button("🗑️ Resetear todo (empezar de cero)"):
+    if st.button("Resetear todo"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.experimental_rerun()
